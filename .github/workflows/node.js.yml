@@ -7,7 +7,6 @@ on:
     branches: [main]
 
 permissions:
-  id-token: write
   contents: read
 
 jobs:
@@ -25,25 +24,65 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint project
+        run: npm run lint
+
       - name: Build project
         run: npm run build
 
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          if-no-files-found: error
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      AWS_S3_BUCKET: ${{ vars.AWS_S3_BUCKET }}
+      AWS_CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.AWS_CLOUDFRONT_DISTRIBUTION_ID }}
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist
+
+      - name: Validate deployment configuration
+        run: |
+          for name in AWS_ROLE_ARN AWS_REGION AWS_S3_BUCKET AWS_CLOUDFRONT_DISTRIBUTION_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required GitHub Actions secret or variable: ${name}"
+              exit 1
+            fi
+          done
+
       - name: Configure AWS credentials
-        if: github.event_name == 'push'
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+          role-session-name: github-actions-${{ github.run_id }}
 
       - name: Deploy to S3
-        if: github.event_name == 'push'
-        run: aws s3 sync dist/ s3://notebooklm-frontend-2026-abc123 --delete
+        run: aws s3 sync dist/ "s3://${AWS_S3_BUCKET}" --delete
 
       - name: Invalidate CloudFront
-        if: github.event_name == 'push'
-        run: aws cloudfront create-invalidation --distribution-id ERTYNZTRRIGJY --paths "/*"
+        run: aws cloudfront create-invalidation --distribution-id "${AWS_CLOUDFRONT_DISTRIBUTION_ID}" --paths "/*"
