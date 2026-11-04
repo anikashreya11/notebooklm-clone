@@ -50,6 +50,21 @@ Project Status
 
 Core application implemented and deployed using AWS services.
 
+CI/CD
+
+GitHub Actions runs `npm ci`, linting, and a production Vite build from `frontend/` on pushes and pull requests targeting `main`. Pushes to `main` then deploy the build to S3 and invalidate CloudFront.
+
+Configure these GitHub Actions values before deployment:
+
+- Secret `AWS_ROLE_ARN`: IAM role assumed by GitHub Actions through OIDC.
+- Secret `AWS_REGION`: AWS region containing the hosting resources.
+- Variable `AWS_S3_BUCKET`: destination bucket for the built frontend.
+- Variable `AWS_CLOUDFRONT_DISTRIBUTION_ID`: distribution serving the frontend.
+
+The IAM role must trust the GitHub OIDC provider `token.actions.githubusercontent.com`, allow the `sts.amazonaws.com` audience, and allow this repository's `refs/heads/main` subject. The recent workflow failures occurred while AWS validated the OIDC token, before S3 or CloudFront deployment; verify the AWS OIDC provider and role trust policy if that failure persists.
+
+The project is a static Vite frontend deployed to S3/CloudFront. It currently has no Jenkins pipeline or Docker deployment, so those configurations are not needed for this deployment path.
+
 Author
 
 Developed as an academic project.
